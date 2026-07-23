@@ -20,6 +20,9 @@
     .review-toggle { margin:2px 0 12px; padding:7px 11px; color:#42516a; background:#eef2f8; border:1px solid #cbd4e2; }
     .review-toggle.active { color:#8a4b00; background:#fff2d9; border-color:#e9b65f; }
     .review-hidden { display:none; }
+    .saved-header { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+    .saved-item { border-top:1px solid #e1e6ef; padding:14px 0; line-height:1.55; }
+    .saved-item:first-of-type { border-top:0; } .saved-item button { float:right; padding:6px 9px; background:#65728a; font-size:.85rem; }
     .actions { margin:22px 0; display:flex; gap:12px; flex-wrap:wrap; } .secondary { background:#63708a; }
     #result { display:none; } .score { font-size:1.45rem; font-weight:800; color:var(--blue); } .answer { margin-top:12px; padding:12px; border-radius:9px; background:#f7f9fd; line-height:1.55; }
     .correct { border-left:4px solid var(--ok); } .wrong { border-left:4px solid var(--ng); } .tag { display:inline-block; font-size:.78rem; background:var(--pale); color:#2058bd; padding:3px 7px; border-radius:99px; font-weight:700; }
@@ -34,11 +37,13 @@
     <label>出題数<select id="count"><option value="10">10問</option><option value="20" selected>20問</option><option value="30">30問</option><option value="50">50問</option></select></label>
     <label>分野<select id="topic"><option value="all">すべて</option></select></label>
     <button id="start">クイズを始める</button>
+    <button id="show-saved" type="button" class="secondary">間違えた問題を見る</button>
   </section>
   <p id="progress" class="progress hidden"></p>
   <form id="quiz"></form>
   <div class="actions hidden" id="actions"><button id="grade" type="button">採点して解説を見る</button><button id="retry" type="button" class="secondary">別の問題でやり直す</button></div>
   <section id="result" class="panel"></section>
+  <section id="saved-panel" class="panel hidden"></section>
 </main>
 <script>
 const Q = [
@@ -168,13 +173,17 @@ const Q = [
 ['スマートファクトリー','現実の工場や機械を仮想空間に再現し、シミュレーションに使う考え方はどれか。',['デジタルツイン','主キー','3ウェイハンドシェイク','電子署名'],0,'デジタルツインは現実の対象をデジタル上に写し取り、分析や予測に活用します。'],
 ['スマートファクトリー','工場で人と協力して作業するよう設計されたロボットはどれか。',['協働ロボット','ルータ','Webサーバ','ページング装置'],0,'協働ロボットは安全機能などにより、人の近くで協力作業する用途を想定します。']
 ];
-const topic=document.querySelector('#topic'), count=document.querySelector('#count'), quiz=document.querySelector('#quiz'), result=document.querySelector('#result'), actions=document.querySelector('#actions'), progress=document.querySelector('#progress');
+const topic=document.querySelector('#topic'), count=document.querySelector('#count'), quiz=document.querySelector('#quiz'), result=document.querySelector('#result'), actions=document.querySelector('#actions'), progress=document.querySelector('#progress'), savedPanel=document.querySelector('#saved-panel');
 const topics=[...new Set(Q.map(q=>q[0]))]; topics.forEach(x=>topic.add(new Option(x,x)));
 let current=[];
 const shuffle=a=>[...a].sort(()=>Math.random()-.5);
+const savedKey='computer-systems-quiz-mistakes-v1';
+function getSaved(){try{return JSON.parse(localStorage.getItem(savedKey)||'[]')}catch{return []}}
+function saveMistake(q){const saved=getSaved(),key=`${q[0]}::${q[1]}`,old=saved.find(x=>x.key===key);if(old){old.count++;old.lastSeen=Date.now()}else saved.push({key,topic:q[0],question:q[1],answer:q[2][q[3]],explanation:q[4],count:1,lastSeen:Date.now()});localStorage.setItem(savedKey,JSON.stringify(saved));}
+function renderSaved(){const saved=getSaved().sort((a,b)=>b.lastSeen-a.lastSeen);savedPanel.classList.remove('hidden');savedPanel.innerHTML=`<div class="saved-header"><h2>間違えた問題（${saved.length}問）</h2>${saved.length?'<button id="clear-saved" type="button" class="secondary">すべて消す</button>':''}</div>${saved.length?saved.map(x=>`<article class="saved-item"><button type="button" data-remove="${encodeURIComponent(x.key)}">削除</button><span class="tag">${x.topic}</span><b> ${x.question}</b><br>正解：${x.answer}<br><small>${x.explanation}（間違い回数：${x.count}）</small></article>`).join(''):'<p>まだ保存された問題はありません。</p>'}`;savedPanel.querySelector('#clear-saved')?.addEventListener('click',()=>{localStorage.removeItem(savedKey);renderSaved()});savedPanel.querySelectorAll('[data-remove]').forEach(btn=>btn.addEventListener('click',()=>{const key=decodeURIComponent(btn.dataset.remove);localStorage.setItem(savedKey,JSON.stringify(getSaved().filter(x=>x.key!==key)));renderSaved()}));}
 function start(){ const pool=topic.value==='all'?Q:Q.filter(q=>q[0]===topic.value); current=shuffle(pool).slice(0,Math.min(+count.value,pool.length)); quiz.innerHTML=current.map((q,i)=>{ const opts=shuffle(q[2].map((t,n)=>({t,n}))); return `<section class="question" data-i="${i}"><span class="tag">${q[0]}</span><h2>問${i+1}　${q[1]}</h2><button type="button" class="review-toggle" aria-pressed="false">見直す</button><div class="options">${opts.map(o=>`<label class="option"><input required type="radio" name="q${i}" value="${o.n}"><span>${o.t}</span></label>`).join('')}</div></section>`}).join(''); quiz.querySelectorAll('.review-toggle').forEach(btn=>btn.onclick=()=>{const on=btn.classList.toggle('active'); btn.setAttribute('aria-pressed',on); btn.textContent=on?'見直しに登録済み':'見直す';}); result.style.display='none'; actions.classList.remove('hidden'); progress.classList.remove('hidden'); progress.textContent=`${current.length}問を選びました。必要な問題は「見直す」を押してから採点しましょう。`; window.scrollTo({top:quiz.offsetTop-10,behavior:'smooth'}); }
-function grade(){ let score=0, wrong={}, shown=0; current.forEach((q,i)=>{const box=quiz.querySelector(`[data-i="${i}"]`), picked=quiz.querySelector(`input[name="q${i}"]:checked`), ok=picked&&+picked.value===q[3], review=box.querySelector('.review-toggle').classList.contains('active'); if(ok)score++; else wrong[q[0]]=(wrong[q[0]]||0)+1; box.classList.add(ok?'correct':'wrong'); box.querySelector('.answer')?.remove(); const chosen=picked?q[2][+picked.value]:'未回答'; box.insertAdjacentHTML('beforeend',`<div class="answer"><b>${ok?'正解！':'不正解'}</b><br>あなたの答え：${chosen}<br>正解：${q[2][q[3]]}<br>${q[4]}</div>`); if(ok&&!review) box.classList.add('review-hidden'); else shown++; }); const weak=Object.entries(wrong).sort((a,b)=>b[1]-a[1]).map(x=>x[0]).join('・'); result.style.display='block'; result.innerHTML=`<div class="score">${score} / ${current.length} 問 正解</div><p>${score===current.length?'満点です！ この調子で、選択肢の理由まで説明できるようにしておくと安心です。':`復習ポイント：${weak||'なし'}。解説を読んで、間違えた理由を確認しましょう。`}<br>見直し対象として ${shown} 問を表示しています。</p>`; progress.textContent='採点済みです。不正解と「見直す」を押した問題だけを表示しています。'; result.scrollIntoView({behavior:'smooth',block:'center'}); }
-document.querySelector('#start').onclick=start; document.querySelector('#retry').onclick=start; document.querySelector('#grade').onclick=grade;
+function grade(){ let score=0, wrong={}, shown=0; current.forEach((q,i)=>{const box=quiz.querySelector(`[data-i="${i}"]`), picked=quiz.querySelector(`input[name="q${i}"]:checked`), ok=picked&&+picked.value===q[3], review=box.querySelector('.review-toggle').classList.contains('active'); if(ok)score++; else {wrong[q[0]]=(wrong[q[0]]||0)+1;saveMistake(q)} box.classList.add(ok?'correct':'wrong'); box.querySelector('.answer')?.remove(); const chosen=picked?q[2][+picked.value]:'未回答'; box.insertAdjacentHTML('beforeend',`<div class="answer"><b>${ok?'正解！':'不正解'}</b><br>あなたの答え：${chosen}<br>正解：${q[2][q[3]]}<br>${q[4]}</div>`); if(ok&&!review) box.classList.add('review-hidden'); else shown++; }); const weak=Object.entries(wrong).sort((a,b)=>b[1]-a[1]).map(x=>x[0]).join('・'); result.style.display='block'; result.innerHTML=`<div class="score">${score} / ${current.length} 問 正解</div><p>${score===current.length?'満点です！ この調子で、選択肢の理由まで説明できるようにしておくと安心です。':`復習ポイント：${weak||'なし'}。解説を読んで、間違えた理由を確認しましょう。`}<br>見直し対象として ${shown} 問を表示しています。間違えた問題は保存済みです。</p>`; progress.textContent='採点済みです。不正解と「見直す」を押した問題だけを表示しています。'; result.scrollIntoView({behavior:'smooth',block:'center'}); }
+document.querySelector('#start').onclick=start; document.querySelector('#retry').onclick=start; document.querySelector('#grade').onclick=grade; document.querySelector('#show-saved').onclick=renderSaved;
 </script>
 </body>
 </html>
